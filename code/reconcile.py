@@ -47,9 +47,11 @@ class CashEvent:
     event_id: str
     user_id: str
     category: str
+    event_type: str              # kept through from RawEvent — needed to gate recurrence eligibility
     cash_direction: str          # debit | credit
     cash_amount: Decimal | None  # None if amount still unresolved
     cash_date: date
+    currency: str                 # needed downstream for FX conversion
     flexibility: str | None
     minimum_allowed_amount: Decimal | None
     source_status: str
@@ -165,9 +167,11 @@ def classify_cash_flow(e: RawEvent) -> CashEvent | None:
         event_id=e.event_id,
         user_id=e.user_id,
         category=e.category,
+        event_type=e.event_type,
         cash_direction=e.direction,
         cash_amount=abs(e.amount) if resolved else None,
         cash_date=cash_date,
+        currency=e.currency,
         flexibility=e.flexibility,
         minimum_allowed_amount=e.minimum_allowed_amount,
         source_status=e.status,
