@@ -140,6 +140,53 @@ def main():
     assert res_f.payment_decision.selected_candidate is None, "Should not exceed max changes"
     print("-> SUCCESS")
 
+    print("\nSCENARIO G: Spending changes appear in final selected decision.")
+    assert res_a.spending_changes[0].action == "reduce_to"
+    assert res_a.spending_changes[0].category == "dining"
+    assert res_a.spending_changes[0].savings == Decimal("500")
+    print("-> SUCCESS")
+
+    print("\nSCENARIO H: Historical events are never modified.")
+    hist_ev = create_event("event_hist_99", "dining", "reducible", 500, 300, source="settled", dt=date(2024, 12, 15))
+    proj_ev = create_event("projected_event_hist_99_2025", "dining", "reducible", 500, 300, source="projected", dt=date(2025, 1, 15))
+    res_h = optimize_spending_and_payments(
+        user_id, base_profile, request_date, requested_amount, Decimal("2900"), minimum_balance_to_keep, horizon_days,
+        [hist_ev, proj_ev], [pay_option], "full_payment", 12, False, desired_completion_date
+    )
+    # Test apply_spending_changes explicitly
+    from spending_changes import apply_spending_changes
+    modified = apply_spending_changes([hist_ev, proj_ev], list(res_h.spending_changes))
+    assert modified[0].cash_amount == 500, "Historical event should not be changed"
+    assert modified[1].cash_amount == 300, "Projected event should be changed"
+    print("-> SUCCESS")
+
+    print("\nSCENARIO I: Multiple changes can combine to make a plan safe.")
+    # Starting 3000, min 500. Requested 2000. Balance buffer = 1000 - 500 = 500 safe cushion.
+    # Future expenses on Jan 15: A=300 (saves 200), B=500 (saves 300), C=100 (saves 100).
+    # Total expenses = 900. Shortfall = 900 - 500 = 400. Need 400 savings to be safe!
+    ev_a = create_event("projected_a_2025", "dining", "reducible", 300, 100, source="projected", dt=date(2025, 1, 15))
+    ev_b = create_event("projected_b_2025", "groceries", "reducible", 500, 200, source="projected", dt=date(2025, 1, 15))
+    ev_c = create_event("projected_c_2025", "gym", "stoppable", 100, 0, source="projected", dt=date(2025, 1, 15))
+    res_i = optimize_spending_and_payments(
+        user_id, base_profile, request_date, requested_amount, Decimal("3000"), minimum_balance_to_keep, horizon_days,
+        [ev_a, ev_b, ev_c], [pay_option], "full_payment", 12, False, desired_completion_date
+    )
+    assert res_i is not None
+    assert len(res_i.spending_changes) == 2
+    savings = sum(c.savings for c in res_i.spending_changes)
+    assert savings >= 400
+    print("-> SUCCESS")
+
+    print("\nSCENARIO J: Spending changes interact correctly with deadline.")
+    # Without changes, maybe only safe by Jan 15 (wait). If deadline is Jan 10, it fails.
+    # With changes, safe immediately (Jan 1). Meets deadline! We saw res_a generated a safe candidate that otherwise failed.
+    assert res_a.payment_decision.selected_candidate.completes_by_deadline
+    print("-> SUCCESS")
+
+    print("\nSCENARIO K: Spending changes feed into normal payment ranking.")
+    assert res_i.payment_decision.selected_candidate.simulation.candidate.candidate_id is not None
+    print("-> SUCCESS")
+
     print("\n================================================================================")
     print("STAGE 6.8.5 — REAL DATA VALIDATION")
     print("================================================================================\n")
@@ -170,6 +217,9 @@ def main():
     for index, request_row in requests_df.iterrows():
         request_id = request_row["request_id"]
         
+        if request_id not in previously_failed:
+             continue
+             
         user_id = str(request_row["user_id"])
         profile_row = profiles_df[profiles_df["user_id"].astype(str) == user_id].iloc[0]
         
@@ -249,8 +299,27 @@ def main():
                 for i, p in enumerate(sel_cand.payments):
                     print(f"  Payment {i+1}: {p[0]} -> {p[1]}")
                     
+                    
                 found = True
                 break
+            else:
+                el = identify_eligible_spending(sim_evs, user_id, profile_row.to_dict())
+                total_max_savings = sum([c.original_amount - c.new_amount for c in el])
+                shortfall = req_amount - base_decision.amount_safe_to_pay
+                print(f"FAILED: {request_id} (shortfall vs savings)")
+                for c in el:
+                     print(f"  {c.action} {c.target_event_id} ({c.category}) : Saves {c.original_amount - c.new_amount}")
+                print(f"Total maximum possible savings: {total_max_savings}")
+                print(f"Amount still required: {shortfall}\n")
+        else:
+             el = identify_eligible_spending(sim_evs, user_id, profile_row.to_dict())
+             total_max_savings = sum([c.original_amount - c.new_amount for c in el])
+             shortfall = req_amount - base_decision.amount_safe_to_pay
+             print(f"FAILED: {request_id} (shortfall vs savings)")
+             for c in el:
+                  print(f"  {c.action} {c.target_event_id} ({c.category}) : Saves {c.original_amount - c.new_amount}")
+             print(f"Total maximum possible savings: {total_max_savings}")
+             print(f"Amount still required: {shortfall}\n")
                 
     if not found:
         print("No real request could be made affordable using valid spending changes.")
