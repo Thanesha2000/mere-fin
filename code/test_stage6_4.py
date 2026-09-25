@@ -162,6 +162,9 @@ candidates = generate_payment_candidates(
         "requested_amount"
     ],
     eligible_payment_options=selected_options,
+    payment_methods_user_will_consider=selected_profile[
+        "payment_methods_user_will_consider"
+    ],
 )
 
 

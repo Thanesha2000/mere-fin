@@ -40,6 +40,7 @@ candidates = generate_payment_candidates(
     request_date=request["request_date"],
     requested_amount=request["requested_amount"],
     eligible_payment_options=eligible_options,
+    payment_methods_user_will_consider=profile["payment_methods_user_will_consider"],
 )
 
 print("=" * 60)
